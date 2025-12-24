@@ -1,4 +1,4 @@
-import { world, system, TicksPerSecond, EntityComponentTypes, MolangVariableMap } from "@minecraft/server";
+import { world, system, TicksPerSecond, EntityComponentTypes } from "@minecraft/server";
 import { MinecraftEntityTypes } from "vanilla-types/index";
 import { runJobAsync } from "./runJobAsync";
 const COLLISION_BOX_CONFIG = {
@@ -108,7 +108,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                     const endCorner = backRight;
                     const detectionLocation = {
                         x: startCorner.x,
-                        y: startCorner.y + height,
+                        y: startCorner.y + height + 1,
                         z: startCorner.z
                     };
                     const detectionVolume = {
@@ -118,7 +118,6 @@ world.afterEvents.worldLoad.subscribe(async () => {
                     };
                     const entitiesAbove = dimension.getEntities({
                         excludeTypes: ["yn:collision_box_switcher"],
-                        families: ["player"],
                         location: detectionLocation,
                         volume: detectionVolume
                     }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
@@ -155,17 +154,6 @@ world.afterEvents.worldLoad.subscribe(async () => {
                     }
                     else {
                         entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-                        const particle = new MolangVariableMap();
-                        dimension.spawnParticle("minecraft:villager_happy", {
-                            x: detectionLocation.x,
-                            y: detectionLocation.y,
-                            z: detectionLocation.z
-                        }, particle);
-                        dimension.spawnParticle("minecraft:villager_happy", {
-                            x: detectionLocation.x + detectionVolume.x,
-                            y: detectionLocation.y + detectionVolume.y,
-                            z: detectionLocation.z + detectionVolume.z
-                        }, particle);
                         const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
                         if (solidCollisionEntityID) {
                             continue;
