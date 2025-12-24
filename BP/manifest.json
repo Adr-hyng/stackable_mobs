@@ -1,0 +1,72 @@
+{
+    "format_version": 2,
+    "header": {
+        "name": "Stackable Mobs BP §8(1.1.0) [DEBUG]",
+        "description": "Making mobs stackable like boats. \n @Made By: https://twitter.com/h_YanG_0A",
+        "uuid": "9c5eca3d-1499-481b-b066-eff81c24c16d",
+        "version": [
+            1,
+            1,
+            0
+        ],
+        "min_engine_version": [
+            1,
+            21,
+            120
+        ]
+    },
+    "modules": [
+        {
+            "description": "item and entity definitions",
+            "type": "data",
+            "uuid": "f936715a-7577-41b7-ae31-46441ebf58b8",
+            "version": [
+                1,
+                0,
+                0
+            ]
+        },
+        {
+            "description": "scripts",
+            "type": "script",
+            "language": "javascript",
+            "uuid": "c15ca7e1-d90a-4244-81fc-1c51264b0c0f",
+            "version": [
+                1,
+                1,
+                0
+            ],
+            "entry": "scripts/main.js"
+        }
+    ],
+    "capabilities": [
+        "script_eval"
+    ],
+    "dependencies": [
+        {
+            "module_name": "@minecraft/server",
+            "version": "2.4.0"
+        },
+        {
+            "module_name": "@minecraft/server-ui",
+            "version": "2.0.0"
+        },
+        {
+            "uuid": "a4708bbf-5227-4d9c-9a0c-d935287aee5b",
+            "version": [
+                1,
+                1,
+                0
+            ]
+        }
+    ],
+    "metadata": {
+        "authors": [
+            "@h_YanG_0A",
+            "DaL4y"
+        ],
+        "product_type": "addon",
+        "license": "GPL-3.0-or-later",
+        "url": "https://twitter.com/h_YanG_0A"
+    }
+}

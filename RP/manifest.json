@@ -1,0 +1,41 @@
+{
+    "format_version": 2,
+    "header": {
+        "name": "Stackable Mobs RP §8(1.1.0) [DEBUG]",
+        "description": "Making mobs stackable like boats. \n @Made By: https://twitter.com/h_YanG_0A",
+        "uuid": "a4708bbf-5227-4d9c-9a0c-d935287aee5b",
+        "version": [
+            1,
+            1,
+            0
+        ],
+        "min_engine_version": [
+            1,
+            21,
+            120
+        ]
+    },
+    "modules": [
+        {
+            "type": "resources",
+            "uuid": "8dc80e2f-f712-4c8a-bedb-ae8c3226a5e3",
+            "version": [
+                1,
+                1,
+                0
+            ]
+        }
+    ],
+    "metadata": {
+        "authors": [
+            "@h_YanG_0A",
+            "DaL4y"
+        ],
+        "product_type": "addon",
+        "license": "GPL-3.0-or-later",
+        "url": "https://twitter.com/h_YanG_0A"
+    },
+    "capabilities": [
+        "pbr"
+    ]
+}
