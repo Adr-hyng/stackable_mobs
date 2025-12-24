@@ -1,5 +1,7 @@
 import { world, system, Entity, TicksPerSecond, EntityComponentTypes, MolangVariableMap } from "@minecraft/server";
 import { MinecraftEntityTypes } from "vanilla-types/index";
+import { runJobAsync } from "./runJobAsync";
+import { Vec3 } from "VectorUtils";
 
 // Configuration for collision box width generation
 const COLLISION_BOX_CONFIG = {
@@ -86,21 +88,26 @@ world.afterEvents.entityHurt.subscribe((e) => {
 });
 
 world.afterEvents.worldLoad.subscribe( () => {
-  const job = system.runInterval(() => {
+  // Process entities in batches to distribute load across ticks
+  const processEntities = function*(resolve: () => void, jobRef: { job: number }) {
     try {
-      for ( const player of world.getPlayers()) {
+      const players = world.getPlayers();
+      
+      for (const player of players) {
         const dimension = player.dimension;
-  
         const entities = dimension.getEntities({excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"]});
-  
-        for ( const entity of entities) {
-          const location = {x: Math.floor(entity.location.x), y: Math.floor(entity.location.y), z: Math.floor(entity.location.z)};
+        
+        for (const entity of entities) {
+          // const location = {x: Math.floor(entity.location.x), y: Math.floor(entity.location.y), z: Math.floor(entity.location.z)};
           const aabb = entity.getAABB();
           let width = aabb.extent.x * 2;
           let height = aabb.extent.y * 2;
         
           // Ignore if width is equal or below 0.0
-          if (width <= 0.0) continue;
+          if (width <= 0.0) {
+            yield; // Yield after each entity check to distribute load
+            continue;
+          }
           
           const viewDirection = entity.getViewDirection();
           
@@ -129,7 +136,7 @@ world.afterEvents.worldLoad.subscribe( () => {
           
           // Offset to shift backRight corner further towards the back
           // Adjust this value: 0.5 for half block, 1.0 for one block shift
-          const backOffset = 1; // Change to 1.0 for 1 block shift
+          const backOffset = 0.75; // Change to 1.0 for 1 block shift
           
           const backRight = {
             x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
@@ -145,7 +152,7 @@ world.afterEvents.worldLoad.subscribe( () => {
           // Volume is the distance/direction vector, not absolute position
           const detectionLocation = {
             x: startCorner.x,
-            y: location.y + 1.5,
+            y: startCorner.y + (height / 2),
             z: startCorner.z
           };
           
@@ -155,6 +162,7 @@ world.afterEvents.worldLoad.subscribe( () => {
             z: endCorner.z - startCorner.z
           };
 
+          yield;
           const entitiesAbove = dimension.getEntities({
             excludeTypes: ["yn:collision_box_switcher"], 
             families: ["player"],
@@ -164,9 +172,15 @@ world.afterEvents.worldLoad.subscribe( () => {
 
           if(!entitiesAbove.length) {
             const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
-            if(!solidCollisionEntityID) continue;
+            if(!solidCollisionEntityID) {
+              yield; // Yield after each entity check to distribute load
+              continue;
+            }
             const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString()) as Entity;
-            if(!solidCollisionEntity) continue;
+            if(!solidCollisionEntity) {
+              yield; // Yield after each entity check to distribute load
+              continue;
+            }
             // If there's already a solid collision
             // Then, remove it, since there's no point for using the solid collision box, when there's no entity above.
             solidCollisionEntity.remove();
@@ -176,13 +190,30 @@ world.afterEvents.worldLoad.subscribe( () => {
           
           // There's an entity above.
           else {
+            // Debug
+            const particle = new MolangVariableMap();
+            dimension.spawnParticle("minecraft:villager_happy", {
+              x: detectionLocation.x,
+              y: detectionLocation.y,
+              z: detectionLocation.z
+            }, particle);
+            dimension.spawnParticle("minecraft:villager_happy", {
+              x: detectionLocation.x + detectionVolume.x,
+              y: detectionLocation.y + detectionVolume.y,
+              z: detectionLocation.z + detectionVolume.z
+            }, particle);
+
             // If there's no solid collision box, then spawn one.
             const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
-            if(solidCollisionEntityID) continue;
+            if(solidCollisionEntityID) {
+              yield; // Yield after each entity check to distribute load
+              continue;
+            }
           
             // Get compressed event name based on width
             const eventName = getCompressedEventName(width);
             if (!eventName) {
+              yield; // Yield after each entity check to distribute load
               continue;
             }
           
@@ -199,6 +230,7 @@ world.afterEvents.worldLoad.subscribe( () => {
             );
 
             solidCollisionEntity.triggerEvent(eventName);
+            console.warn('Triggered event:', eventName);
             // Trigger the event with format <width>_<height>_set (using formatted strings to preserve 2 decimals)
             solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
             solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
@@ -206,14 +238,25 @@ world.afterEvents.worldLoad.subscribe( () => {
             entity.addTag('yn:solid_collision_box');
             console.warn('Spawned solid collision box entity for entity:', entity.id);
           }
+          
+          yield; // Yield after processing each entity to distribute load across ticks
         }
       }
     } catch (error) {
       console.error('Error in world load job:', error);
-      system.clearRun(job);
-      return;
     }
-  }, 0.5)
+    
+    // Schedule next run after 0.5 seconds (10 ticks at 20 TPS)
+    // system.runTimeout(() => {
+    runJobAsync(processEntities);
+    // }, 1);
+    
+    system.clearJob(jobRef.job);
+    resolve();
+  };
+  
+  // Start the async job
+  runJobAsync(processEntities);
 });
 
 
@@ -237,34 +280,8 @@ world.afterEvents.entitySpawn.subscribe((spawnEvent) => {
 
     const aabb = entity.getAABB();
     let width = aabb.extent.x * 2;
-    let height = aabb.extent.y * 2;
-    const dimension = entity.dimension;
-  
     // Ignore if width is equal or below 0.0
     if (width <= 0.0) return;
-  
-    // Format to 2 decimal places as strings (preserve trailing zeros for event name)
-    const widthStr = width.toFixed(2);
-    const heightStr = '0.05';
-  
-    // Summon collision box switcher entity
-    let topPosition = {
-      x: entity.location.x,
-      y: entity.location.y + height,
-      z: entity.location.z
-    };
-
-    // const collisionBoxEntity = dimension.spawnEntity(
-    //   "yn:collision_box_switcher",
-    //   topPosition
-    // );
-    
-    // // Trigger the event with format <width>_<height>_set (using formatted strings to preserve 2 decimals)
-    // const eventName = `${widthStr}_${heightStr}_set`;
-    // collisionBoxEntity.triggerEvent(eventName);
-    // collisionBoxEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
-    // collisionBoxEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
-    // entity.setDynamicProperty('yn:collisionBoxEntityID', collisionBoxEntity.id);
     entity.addTag('yn:solid_collision_box');
     return;
   }
