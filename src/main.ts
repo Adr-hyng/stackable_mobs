@@ -122,7 +122,7 @@ world.afterEvents.entityHurt.subscribe((e) => {
   ownerEntity.applyDamage(e.damage, e.damageSource);
 });
 
-world.afterEvents.worldLoad.subscribe( () => {
+world.afterEvents.worldLoad.subscribe( async () => {
   // Process entities in batches to distribute load across ticks
   const processEntities = function*(resolve: () => void, jobRef: { job: number }) {
     try {
@@ -133,6 +133,8 @@ world.afterEvents.worldLoad.subscribe( () => {
         const entities = dimension.getEntities({excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"]});
         
         for (const entity of entities) {
+
+          yield;
           // const location = {x: Math.floor(entity.location.x), y: Math.floor(entity.location.y), z: Math.floor(entity.location.z)};
           const aabb = entity.getAABB();
           let width = aabb.extent.x * 2;
@@ -140,7 +142,6 @@ world.afterEvents.worldLoad.subscribe( () => {
         
           // Ignore if width is equal or below 0.0
           if (width <= 0.0) {
-            yield; // Yield after each entity check to distribute load
             continue;
           }
           
@@ -187,7 +188,7 @@ world.afterEvents.worldLoad.subscribe( () => {
           // Volume is the distance/direction vector, not absolute position
           const detectionLocation = {
             x: startCorner.x,
-            y: startCorner.y + (height / 2),
+            y: startCorner.y + height,
             z: startCorner.z
           };
           
@@ -197,7 +198,6 @@ world.afterEvents.worldLoad.subscribe( () => {
             z: endCorner.z - startCorner.z
           };
 
-          yield;
           const entitiesAbove = dimension.getEntities({
             excludeTypes: ["yn:collision_box_switcher"], 
             families: ["player"],
@@ -210,42 +210,39 @@ world.afterEvents.worldLoad.subscribe( () => {
             if(!solidCollisionEntityID) {
               // Clear the no entities above timestamp if it exists
               entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-              yield; // Yield after each entity check to distribute load
               continue;
             }
             const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString()) as Entity;
             if(!solidCollisionEntity) {
               // Clear the no entities above timestamp if it exists
               entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-              yield; // Yield after each entity check to distribute load
               continue;
             }
             
             // Check if we've already started the delay timer
-            const noEntitiesAboveTick = entity.getDynamicProperty("yn:noEntitiesAboveTick") as number | null;
+            const noEntitiesAboveTickRaw = entity.getDynamicProperty("yn:noEntitiesAboveTick");
+            const noEntitiesAboveTick = (typeof noEntitiesAboveTickRaw === 'number') ? noEntitiesAboveTickRaw : null;
             const currentTick = system.currentTick;
             
-            if (noEntitiesAboveTick === null) {
+            if (noEntitiesAboveTick === null || noEntitiesAboveTick === undefined) {
               // First time detecting no entities above - start the timer
               entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
-              yield; // Yield after each entity check to distribute load
               continue;
             }
             
             // Safety check: if stored tick is invalid or in the future, reset it
-            if (noEntitiesAboveTick > currentTick) {
+            if (typeof noEntitiesAboveTick !== 'number' || noEntitiesAboveTick > currentTick) {
               entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
-              yield; // Yield after each entity check to distribute load
               continue;
             }
             
-            // Check if 20 ticks (1 second at 20 TPS) have passed since first detection
+            // Check if 19 ticks (1 tick short of 1 second) have passed since first detection
+            // This allows instant detection when an entity appears above
             const elapsedTicks = currentTick - noEntitiesAboveTick;
-            const requiredTicks = TicksPerSecond; // 20 ticks = 1 second
+            const requiredTicks = TicksPerSecond - 1; // 19 ticks = 0.95 seconds
             
             if (elapsedTicks < requiredTicks) {
               // Not enough time has passed, wait more
-              yield; // Yield after each entity check to distribute load
               continue;
             }
             
@@ -253,7 +250,7 @@ world.afterEvents.worldLoad.subscribe( () => {
             solidCollisionEntity.remove();
             entity.setDynamicProperty('yn:collisionBoxEntityID', null);
             entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-            console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
+            // console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
           } 
           
           // There's an entity above.
@@ -277,14 +274,12 @@ world.afterEvents.worldLoad.subscribe( () => {
             // If there's no solid collision box, then spawn one.
             const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
             if(solidCollisionEntityID) {
-              yield; // Yield after each entity check to distribute load
               continue;
             }
           
             // Get compressed event name based on width
             const eventName = getCompressedEventName(width);
             if (!eventName) {
-              yield; // Yield after each entity check to distribute load
               continue;
             }
           
@@ -301,13 +296,12 @@ world.afterEvents.worldLoad.subscribe( () => {
             );
 
             solidCollisionEntity.triggerEvent(eventName);
-            console.warn('Triggered event:', eventName, width, height);
             // Trigger the event with format <width>_<height>_set (using formatted strings to preserve 2 decimals)
             solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
             solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
             entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
             entity.addTag('yn:solid_collision_box');
-            console.warn('Spawned solid collision box entity for entity:', entity.id);
+            // console.warn('Spawned solid collision box entity for entity:', entity.id);
           }
           
           yield; // Yield after processing each entity to distribute load across ticks
@@ -318,16 +312,15 @@ world.afterEvents.worldLoad.subscribe( () => {
     }
     
     // Schedule next run after 0.5 seconds (10 ticks at 20 TPS)
-    system.runTimeout(async () => {
+    system.run(async() => {
       await runJobAsync(processEntities);
       system.clearJob(jobRef.job);
       resolve();
-    }, 1);
-    
+    })
   };
   
   // Start the async job
-  runJobAsync(processEntities);
+  await runJobAsync(processEntities);
 });
 
 
