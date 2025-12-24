@@ -7,13 +7,23 @@ const COLLISION_BOX_CONFIG = {
     max: 13.0,
     step: 0.01
 };
+let COLLISION_BOX_WIDTHS_CACHE = null;
 function generateCollisionBoxWidths() {
+    if (COLLISION_BOX_WIDTHS_CACHE !== null) {
+        return COLLISION_BOX_WIDTHS_CACHE;
+    }
     const widths = [COLLISION_BOX_CONFIG.start];
-    const maxWithEpsilon = COLLISION_BOX_CONFIG.max + (COLLISION_BOX_CONFIG.step / 2);
+    const firstSegmentEnd = 4.0;
+    const maxWithEpsilon = firstSegmentEnd + (COLLISION_BOX_CONFIG.step / 2);
     for (let value = COLLISION_BOX_CONFIG.min; value <= maxWithEpsilon; value += COLLISION_BOX_CONFIG.step) {
         const rounded = Math.round(value * 100) / 100;
+        if (rounded > firstSegmentEnd + 0.001)
+            break;
         widths.push(rounded);
     }
+    widths.push(4.02);
+    widths.push(13.0);
+    COLLISION_BOX_WIDTHS_CACHE = widths;
     return widths;
 }
 const COLLISION_BOX_WIDTHS = generateCollisionBoxWidths();
@@ -22,16 +32,27 @@ function getCompressedEventName(width) {
     if (Math.abs(roundedWidth - COLLISION_BOX_CONFIG.start) < 0.001) {
         return 'e0';
     }
-    if (roundedWidth < COLLISION_BOX_CONFIG.min || roundedWidth > COLLISION_BOX_CONFIG.max) {
+    if (roundedWidth < COLLISION_BOX_CONFIG.min || roundedWidth > 13.0) {
         return null;
     }
-    const calculatedIndex = 1 + Math.round((roundedWidth - COLLISION_BOX_CONFIG.min) / COLLISION_BOX_CONFIG.step);
+    let calculatedIndex;
+    if (roundedWidth <= 4.0) {
+        calculatedIndex = 1 + Math.round((roundedWidth - COLLISION_BOX_CONFIG.min) / COLLISION_BOX_CONFIG.step);
+    }
+    else if (Math.abs(roundedWidth - 4.02) < 0.001) {
+        calculatedIndex = 382;
+    }
+    else if (Math.abs(roundedWidth - 13.0) < 0.001) {
+        calculatedIndex = 383;
+    }
+    else {
+        return null;
+    }
     if (calculatedIndex < 1 || calculatedIndex >= COLLISION_BOX_WIDTHS.length) {
         return null;
     }
-    const calculatedWidth = COLLISION_BOX_CONFIG.min + (calculatedIndex - 1) * COLLISION_BOX_CONFIG.step;
-    const roundedCalculatedWidth = Math.round(calculatedWidth * 100) / 100;
-    if (Math.abs(roundedCalculatedWidth - roundedWidth) < 0.001) {
+    const actualWidth = COLLISION_BOX_WIDTHS[calculatedIndex];
+    if (Math.abs(actualWidth - roundedWidth) < 0.001) {
         return `e${calculatedIndex}`;
     }
     return null;
@@ -77,7 +98,7 @@ world.afterEvents.worldLoad.subscribe(() => {
                         y: entityCenter.y,
                         z: entityCenter.z + (normalizedViewZ * extentX) + (rightZ * extentZ)
                     };
-                    const backOffset = 0.75;
+                    const backOffset = 1;
                     const backRight = {
                         x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
                         y: entityCenter.y,
@@ -105,19 +126,41 @@ world.afterEvents.worldLoad.subscribe(() => {
                     if (!entitiesAbove.length) {
                         const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
                         if (!solidCollisionEntityID) {
+                            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
                             yield;
                             continue;
                         }
                         const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString());
                         if (!solidCollisionEntity) {
+                            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                            yield;
+                            continue;
+                        }
+                        const noEntitiesAboveTick = entity.getDynamicProperty("yn:noEntitiesAboveTick");
+                        const currentTick = system.currentTick;
+                        if (noEntitiesAboveTick === null) {
+                            entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+                            yield;
+                            continue;
+                        }
+                        if (noEntitiesAboveTick > currentTick) {
+                            entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+                            yield;
+                            continue;
+                        }
+                        const elapsedTicks = currentTick - noEntitiesAboveTick;
+                        const requiredTicks = TicksPerSecond;
+                        if (elapsedTicks < requiredTicks) {
                             yield;
                             continue;
                         }
                         solidCollisionEntity.remove();
                         entity.setDynamicProperty('yn:collisionBoxEntityID', null);
-                        console.warn('Removed solid collision box entity for entity:', entity.id);
+                        entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                        console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
                     }
                     else {
+                        entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
                         const particle = new MolangVariableMap();
                         dimension.spawnParticle("minecraft:villager_happy", {
                             x: detectionLocation.x,
@@ -146,7 +189,7 @@ world.afterEvents.worldLoad.subscribe(() => {
                         };
                         const solidCollisionEntity = dimension.spawnEntity("yn:collision_box_switcher", topPosition);
                         solidCollisionEntity.triggerEvent(eventName);
-                        console.warn('Triggered event:', eventName);
+                        console.warn('Triggered event:', eventName, width, height);
                         solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
                         solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
                         entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
@@ -160,9 +203,11 @@ world.afterEvents.worldLoad.subscribe(() => {
         catch (error) {
             console.error('Error in world load job:', error);
         }
-        runJobAsync(processEntities);
-        system.clearJob(jobRef.job);
-        resolve();
+        system.runTimeout(async () => {
+            await runJobAsync(processEntities);
+            system.clearJob(jobRef.job);
+            resolve();
+        }, 1);
     };
     runJobAsync(processEntities);
 });

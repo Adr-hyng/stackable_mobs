@@ -11,34 +11,56 @@ const COLLISION_BOX_CONFIG = {
   step: 0.01          // Increment step
 };
 
+// Cache for the generated collision box widths array
+let COLLISION_BOX_WIDTHS_CACHE: number[] | null = null;
+
 /**
  * Generates the collision box widths array programmatically
- * Pattern: [start, min, min+step, min+2*step, ..., max]
+ * Pattern: [start, min, min+step, ..., 4.0, 4.02, 13.0]
+ * Note: 4.01 is skipped to match the original array structure
+ * Uses caching to ensure the array is only generated once
  * @returns Array of collision box widths
  */
 function generateCollisionBoxWidths(): number[] {
+  // Return cached array if already generated
+  if (COLLISION_BOX_WIDTHS_CACHE !== null) {
+    return COLLISION_BOX_WIDTHS_CACHE;
+  }
+  
   const widths: number[] = [COLLISION_BOX_CONFIG.start];
   
-  // Generate from min to max with step increment
-  // Add small epsilon to max to ensure it's included despite floating point precision
-  const maxWithEpsilon = COLLISION_BOX_CONFIG.max + (COLLISION_BOX_CONFIG.step / 2);
+  // Generate from min (0.20) to 4.0 with step increment
+  const firstSegmentEnd = 4.0;
+  const maxWithEpsilon = firstSegmentEnd + (COLLISION_BOX_CONFIG.step / 2);
   
   for (let value = COLLISION_BOX_CONFIG.min; value <= maxWithEpsilon; value += COLLISION_BOX_CONFIG.step) {
     // Round to 2 decimal places to avoid floating point precision issues
     const rounded = Math.round(value * 100) / 100;
+    // Stop at 4.0 (don't include 4.01)
+    if (rounded > firstSegmentEnd + 0.001) break;
     widths.push(rounded);
   }
+  
+  // Add 4.02 (skipping 4.01)
+  widths.push(4.02);
+  
+  // Add 13.0 at the end
+  widths.push(13.0);
+  
+  // Cache the result
+  COLLISION_BOX_WIDTHS_CACHE = widths;
   
   return widths;
 }
 
 // Mapping of width values to compressed event indices (e0, e1, e2, etc.)
-// Generated programmatically based on configuration
+// Generated programmatically based on configuration (cached after first generation)
 const COLLISION_BOX_WIDTHS = generateCollisionBoxWidths();
 
 /**
  * Gets the compressed event name (e0, e1, e2, etc.) for a given collision box width
  * Uses O(1) calculation instead of O(n) array search for better performance
+ * Handles the special case where 4.01 is skipped (goes from 4.0 to 4.02 to 13.0)
  * @param width - The collision box width value
  * @returns The compressed event name (e{index}) or null if no match found
  */
@@ -52,24 +74,37 @@ function getCompressedEventName(width: number): string | null {
   }
   
   // Check if width is within the generated range
-  if (roundedWidth < COLLISION_BOX_CONFIG.min || roundedWidth > COLLISION_BOX_CONFIG.max) {
+  if (roundedWidth < COLLISION_BOX_CONFIG.min || roundedWidth > 13.0) {
     return null;
   }
   
-  // Calculate index directly: start is at index 0, then min starts at index 1
-  // Index = 1 + (width - min) / step
-  const calculatedIndex = 1 + Math.round((roundedWidth - COLLISION_BOX_CONFIG.min) / COLLISION_BOX_CONFIG.step);
+  let calculatedIndex: number;
+  
+  // Handle the three segments: 0.20-4.0 (continuous), 4.02, 13.0
+  if (roundedWidth <= 4.0) {
+    // Continuous segment from 0.20 to 4.0
+    calculatedIndex = 1 + Math.round((roundedWidth - COLLISION_BOX_CONFIG.min) / COLLISION_BOX_CONFIG.step);
+  } else if (Math.abs(roundedWidth - 4.02) < 0.001) {
+    // 4.02 is right after 4.0 (skipping 4.01)
+    // Index of 4.0 = 1 + (4.0 - 0.20) / 0.01 = 1 + 380 = 381
+    // So 4.02 is at index 382
+    calculatedIndex = 382;
+  } else if (Math.abs(roundedWidth - 13.0) < 0.001) {
+    // 13.0 is at the end (index 383)
+    calculatedIndex = 383;
+  } else {
+    // Values between 4.02 and 13.0 (excluding 13.0) don't exist
+    return null;
+  }
   
   // Validate index is within bounds
   if (calculatedIndex < 1 || calculatedIndex >= COLLISION_BOX_WIDTHS.length) {
     return null;
   }
   
-  // Verify the calculated width matches (within tolerance for floating point)
-  const calculatedWidth = COLLISION_BOX_CONFIG.min + (calculatedIndex - 1) * COLLISION_BOX_CONFIG.step;
-  const roundedCalculatedWidth = Math.round(calculatedWidth * 100) / 100;
-  
-  if (Math.abs(roundedCalculatedWidth - roundedWidth) < 0.001) {
+  // Verify the width at this index matches (use actual array value for accuracy)
+  const actualWidth = COLLISION_BOX_WIDTHS[calculatedIndex];
+  if (Math.abs(actualWidth - roundedWidth) < 0.001) {
     return `e${calculatedIndex}`;
   }
   
@@ -136,7 +171,7 @@ world.afterEvents.worldLoad.subscribe( () => {
           
           // Offset to shift backRight corner further towards the back
           // Adjust this value: 0.5 for half block, 1.0 for one block shift
-          const backOffset = 0.75; // Change to 1.0 for 1 block shift
+          const backOffset = 1; // Change to 1.0 for 1 block shift
           
           const backRight = {
             x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
@@ -173,23 +208,59 @@ world.afterEvents.worldLoad.subscribe( () => {
           if(!entitiesAbove.length) {
             const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
             if(!solidCollisionEntityID) {
+              // Clear the no entities above timestamp if it exists
+              entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
               yield; // Yield after each entity check to distribute load
               continue;
             }
             const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString()) as Entity;
             if(!solidCollisionEntity) {
+              // Clear the no entities above timestamp if it exists
+              entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
               yield; // Yield after each entity check to distribute load
               continue;
             }
-            // If there's already a solid collision
-            // Then, remove it, since there's no point for using the solid collision box, when there's no entity above.
+            
+            // Check if we've already started the delay timer
+            const noEntitiesAboveTick = entity.getDynamicProperty("yn:noEntitiesAboveTick") as number | null;
+            const currentTick = system.currentTick;
+            
+            if (noEntitiesAboveTick === null) {
+              // First time detecting no entities above - start the timer
+              entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+              yield; // Yield after each entity check to distribute load
+              continue;
+            }
+            
+            // Safety check: if stored tick is invalid or in the future, reset it
+            if (noEntitiesAboveTick > currentTick) {
+              entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+              yield; // Yield after each entity check to distribute load
+              continue;
+            }
+            
+            // Check if 20 ticks (1 second at 20 TPS) have passed since first detection
+            const elapsedTicks = currentTick - noEntitiesAboveTick;
+            const requiredTicks = TicksPerSecond; // 20 ticks = 1 second
+            
+            if (elapsedTicks < requiredTicks) {
+              // Not enough time has passed, wait more
+              yield; // Yield after each entity check to distribute load
+              continue;
+            }
+            
+            // 1 second has passed, now remove the collision box entity
             solidCollisionEntity.remove();
             entity.setDynamicProperty('yn:collisionBoxEntityID', null);
-            console.warn('Removed solid collision box entity for entity:', entity.id);
+            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+            console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
           } 
           
           // There's an entity above.
           else {
+            // Clear the no entities above timestamp since entities are now above
+            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+            
             // Debug
             const particle = new MolangVariableMap();
             dimension.spawnParticle("minecraft:villager_happy", {
@@ -230,7 +301,7 @@ world.afterEvents.worldLoad.subscribe( () => {
             );
 
             solidCollisionEntity.triggerEvent(eventName);
-            console.warn('Triggered event:', eventName);
+            console.warn('Triggered event:', eventName, width, height);
             // Trigger the event with format <width>_<height>_set (using formatted strings to preserve 2 decimals)
             solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
             solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
@@ -247,12 +318,12 @@ world.afterEvents.worldLoad.subscribe( () => {
     }
     
     // Schedule next run after 0.5 seconds (10 ticks at 20 TPS)
-    // system.runTimeout(() => {
-    runJobAsync(processEntities);
-    // }, 1);
+    system.runTimeout(async () => {
+      await runJobAsync(processEntities);
+      system.clearJob(jobRef.job);
+      resolve();
+    }, 1);
     
-    system.clearJob(jobRef.job);
-    resolve();
   };
   
   // Start the async job
