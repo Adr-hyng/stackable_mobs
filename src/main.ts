@@ -1,4 +1,4 @@
-import { world, system, Entity, TicksPerSecond, EntityComponentTypes, MolangVariableMap } from "@minecraft/server";
+import { world, system, Entity, TicksPerSecond, EntityComponentTypes, MolangVariableMap, AABB } from "@minecraft/server";
 import { MinecraftEntityTypes } from "vanilla-types/index";
 import { runJobAsync } from "./runJobAsync";
 import { Vec3 } from "VectorUtils";
@@ -122,30 +122,55 @@ world.afterEvents.entityHurt.subscribe((e) => {
   ownerEntity.applyDamage(e.damage, e.damageSource);
 });
 
+// Counter for all collision box switcher entities spawned from worldLoad
+let collisionBoxSwitcherSpawnCount = 0;
+
 world.afterEvents.worldLoad.subscribe( async () => {
   // Process entities in batches to distribute load across ticks
   const processEntities = function*(resolve: () => void, jobRef: { job: number }) {
-    try {
-      const players = world.getPlayers();
-      
-      for (const player of players) {
-        const dimension = player.dimension;
-        const entities = dimension.getEntities({excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"]});
+    // Use a while loop instead of recursion
+    let shouldContinue = true;
+    
+    while (shouldContinue) {
+      try {
+        const players = world.getPlayers();
         
-        for (const entity of entities) {
-
-          // const location = {x: Math.floor(entity.location.x), y: Math.floor(entity.location.y), z: Math.floor(entity.location.z)};
-          const aabb = entity.getAABB();
-          let width = aabb.extent.x * 2;
-          let height = aabb.extent.y * 2;
-          yield;
-        
-          // Ignore if width is equal or below 0.0
-          if (width <= 0.0) {
-            continue;
-          }
-          
-          const viewDirection = entity.getViewDirection();
+        for (const player of players) {
+          try {
+            const dimension = player.dimension;
+            const entities = dimension.getEntities({excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"]});
+            yield;
+            for (const entity of entities) {
+              try {
+                yield;
+                if(!entity || !entity.isValid) continue;
+                
+                // Safely get AABB with error handling
+                let aabb: AABB | null = null;
+                try {
+                  aabb = entity.getAABB();
+                } catch (error) {
+                  // Entity might be invalid or in an invalid state, skip it
+                  continue;
+                }
+                
+                if(!aabb) continue;
+                let width = aabb.extent.x * 2;
+                let height = aabb.extent.y * 2;
+              
+                // Ignore if width is equal or below 0.0
+                if (width <= 0.0) {
+                  continue;
+                }
+                
+                // Safely get view direction
+                let viewDirection;
+                try {
+                  viewDirection = entity.getViewDirection();
+                } catch (error) {
+                  // Entity might not have view direction, skip it
+                  continue;
+                }
           
           // Normalize view direction to only use X and Z (ignore Y)
           const horizontalMagnitude = Math.sqrt(viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z);
@@ -200,143 +225,174 @@ world.afterEvents.worldLoad.subscribe( async () => {
           
           const detectionVolume = {
             x: maxX - minX,
-            y: height + 1, // Increased slightly to catch edge cases
+            y: height + (width / 2), // Increased slightly to catch edge cases
             z: maxZ - minZ
           };
-          let entitiesAbove: Entity[] = [];
+                let entitiesAbove: Entity[] = [];
 
-          // Check for 1st priority, check for jumping nearby entity
-          entitiesAbove = dimension.getEntities({
-            excludeTypes: ["yn:collision_box_switcher"], 
-            families: ["player"],
-            closest: 1,
-            location: detectionLocation,
-            minDistance: width,
-            maxDistance: (width * 2) + 1,
-          }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                // Check for 1st priority, check for jumping nearby entity
+                try {
+                  entitiesAbove = dimension.getEntities({
+                    excludeTypes: ["yn:collision_box_switcher"], 
+                    families: ["player"],
+                    closest: 1,
+                    location: entity.location,
+                    maxDistance: width * 2,
+                  }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                } catch (error) {
+                  // If getEntities fails, continue to next entity
+                  continue;
+                }
 
-          if(!entitiesAbove.length) {
-            // Check for 2nd prioirity
-            entitiesAbove = dimension.getEntities({
-              excludeTypes: ["yn:collision_box_switcher"], 
-              // families: ["player"],
-              location: detectionLocation,
-              volume: detectionVolume
-            }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                if(!entitiesAbove.length) {
+                  // Check for 2nd prioirity
+                  try {
+                    entitiesAbove = dimension.getEntities({
+                      excludeTypes: ["yn:collision_box_switcher"], 
+                      location: detectionLocation,
+                      volume: detectionVolume
+                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
+                  } catch (error) {
+                    // If getEntities fails, continue to next entity
+                    continue;
+                  }
+                }
+
+                if(!entitiesAbove.length) {
+                  const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
+                  if(!solidCollisionEntityID) {
+                    // Clear the no entities above timestamp if it exists
+                    entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                    continue;
+                  }
+                  const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString()) as Entity;
+                  if(!solidCollisionEntity) {
+                    // Clear the no entities above timestamp if it exists
+                    entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                    continue;
+                  }
+                  
+                  // Check if we've already started the delay timer
+                  const noEntitiesAboveTickRaw = entity.getDynamicProperty("yn:noEntitiesAboveTick");
+                  const noEntitiesAboveTick = (typeof noEntitiesAboveTickRaw === 'number') ? noEntitiesAboveTickRaw : null;
+                  const currentTick = system.currentTick;
+                  
+                  if (noEntitiesAboveTick === null || noEntitiesAboveTick === undefined) {
+                    // First time detecting no entities above - start the timer
+                    entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+                    continue;
+                  }
+                  
+                  // Safety check: if stored tick is invalid or in the future, reset it
+                  if (typeof noEntitiesAboveTick !== 'number' || noEntitiesAboveTick > currentTick) {
+                    entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+                    continue;
+                  }
+                  
+                  // Check if 19 ticks (1 tick short of 1 second) have passed since first detection
+                  // This allows instant detection when an entity appears above
+                  const elapsedTicks = currentTick - noEntitiesAboveTick;
+                  const requiredTicks = TicksPerSecond / 2; // 19 ticks = 0.95 seconds
+                  
+                  if (elapsedTicks < requiredTicks) {
+                    // Not enough time has passed, wait more
+                    continue;
+                  }
+                  
+                  // 1 second has passed, now remove the collision box entity
+                  solidCollisionEntity.remove();
+                  // Decrement the spawn counter
+                  collisionBoxSwitcherSpawnCount--;
+                  entity.setDynamicProperty('yn:collisionBoxEntityID', null);
+                  entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                  // console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
+                  // console.warn('Total spawned:', collisionBoxSwitcherSpawnCount);
+                } 
+                
+                // There's an entity above.
+                else {
+                  // Clear the no entities above timestamp since entities are now above
+                  entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                  
+                  // Debug
+                  // const particle = new MolangVariableMap();
+                  // dimension.spawnParticle("minecraft:villager_happy", {
+                  //   x: detectionLocation.x,
+                  //   y: detectionLocation.y,
+                  //   z: detectionLocation.z
+                  // }, particle);
+                  // dimension.spawnParticle("minecraft:villager_happy", {
+                  //   x: detectionLocation.x + detectionVolume.x,
+                  //   y: detectionLocation.y + detectionVolume.y,
+                  //   z: detectionLocation.z + detectionVolume.z
+                  // }, particle);
+
+                  // If there's no solid collision box, then spawn one.
+                  const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
+                  if(solidCollisionEntityID) {
+                    continue;
+                  }
+                
+                  // Get compressed event name based on width
+                  const eventName = getCompressedEventName(width);
+                  if (!eventName) {
+                    continue;
+                  }
+                
+                  // Calculate the block location (floor coordinates) where the collision box will be
+                  const topPosition = {
+                    x: entity.location.x,
+                    y: entity.location.y + height,
+                    z: entity.location.z
+                  };
+          
+                  const solidCollisionEntity = dimension.spawnEntity(
+                    "yn:collision_box_switcher",
+                    topPosition
+                  );
+
+                  solidCollisionEntity.triggerEvent(eventName);
+                  // Trigger the event with format <width>_<height>_set (using formatted strings to preserve 2 decimals)
+                  solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
+                  solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
+                  entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
+                  entity.addTag('yn:solid_collision_box');
+                  
+                  // Increment the spawn counter
+                  collisionBoxSwitcherSpawnCount++;
+                }
+              } catch (error) {
+                // Log error but continue processing other entities
+                console.warn('Error processing entity:', entity?.id, error);
+                continue;
+              }
+              
+              yield; // Yield after processing each entity to distribute load across ticks
+              console.warn("Total spawned:", collisionBoxSwitcherSpawnCount);
+            }
+          } catch (error) {
+            // Log error but continue processing other players
+            console.warn('Error processing player dimension:', error);
+            continue;
           }
-
-          if(!entitiesAbove.length) {
-            const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
-            if(!solidCollisionEntityID) {
-              // Clear the no entities above timestamp if it exists
-              entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-              continue;
-            }
-            const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString()) as Entity;
-            if(!solidCollisionEntity) {
-              // Clear the no entities above timestamp if it exists
-              entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-              continue;
-            }
-            
-            // Check if we've already started the delay timer
-            const noEntitiesAboveTickRaw = entity.getDynamicProperty("yn:noEntitiesAboveTick");
-            const noEntitiesAboveTick = (typeof noEntitiesAboveTickRaw === 'number') ? noEntitiesAboveTickRaw : null;
-            const currentTick = system.currentTick;
-            
-            if (noEntitiesAboveTick === null || noEntitiesAboveTick === undefined) {
-              // First time detecting no entities above - start the timer
-              entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
-              continue;
-            }
-            
-            // Safety check: if stored tick is invalid or in the future, reset it
-            if (typeof noEntitiesAboveTick !== 'number' || noEntitiesAboveTick > currentTick) {
-              entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
-              continue;
-            }
-            
-            // Check if 19 ticks (1 tick short of 1 second) have passed since first detection
-            // This allows instant detection when an entity appears above
-            const elapsedTicks = currentTick - noEntitiesAboveTick;
-            const requiredTicks = 2 - 1; // 19 ticks = 0.95 seconds
-            
-            if (elapsedTicks < requiredTicks) {
-              // Not enough time has passed, wait more
-              continue;
-            }
-            
-            // 1 second has passed, now remove the collision box entity
-            solidCollisionEntity.remove();
-            entity.setDynamicProperty('yn:collisionBoxEntityID', null);
-            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-            console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
-          } 
-          
-          // There's an entity above.
-          else {
-            // Clear the no entities above timestamp since entities are now above
-            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-            
-            // Debug
-            // const particle = new MolangVariableMap();
-            // dimension.spawnParticle("minecraft:villager_happy", {
-            //   x: detectionLocation.x,
-            //   y: detectionLocation.y,
-            //   z: detectionLocation.z
-            // }, particle);
-            // dimension.spawnParticle("minecraft:villager_happy", {
-            //   x: detectionLocation.x + detectionVolume.x,
-            //   y: detectionLocation.y + detectionVolume.y,
-            //   z: detectionLocation.z + detectionVolume.z
-            // }, particle);
-
-            // If there's no solid collision box, then spawn one.
-            const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
-            if(solidCollisionEntityID) {
-              continue;
-            }
-          
-            // Get compressed event name based on width
-            const eventName = getCompressedEventName(width);
-            if (!eventName) {
-              continue;
-            }
-          
-            // Calculate the block location (floor coordinates) where the collision box will be
-            const topPosition = {
-              x: entity.location.x,
-              y: entity.location.y + height,
-              z: entity.location.z
-            };
-    
-            const solidCollisionEntity = dimension.spawnEntity(
-              "yn:collision_box_switcher",
-              topPosition
-            );
-
-            solidCollisionEntity.triggerEvent(eventName);
-            // Trigger the event with format <width>_<height>_set (using formatted strings to preserve 2 decimals)
-            solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
-            solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
-            entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
-            entity.addTag('yn:solid_collision_box');
-            console.warn('Spawned solid collision box entity for entity:', entity.id);
-          }
-          
-          yield; // Yield after processing each entity to distribute load across ticks
+        }
+        
+        // Wait 10 ticks (0.5 seconds) before next iteration
+        for (let i = 0; i < 10; i++) {
+          yield;
+        }
+      } catch (error) {
+        // Log error but continue the while loop
+        console.warn('Error in processEntities loop:', error);
+        // Wait a bit before retrying
+        for (let i = 0; i < 3; i++) {
+          yield;
         }
       }
-    } catch (error) {
-      console.error('Error in world load job:', error);
     }
     
-    // Schedule next run after 0.5 seconds (10 ticks at 20 TPS)
-    system.run(async() => {
-      await runJobAsync(processEntities);
-      system.clearJob(jobRef.job);
-      resolve();
-    })
+    system.clearJob(jobRef.job);
+    resolve();
   };
   
   // Start the async job
@@ -423,7 +479,7 @@ world.afterEvents.dataDrivenEntityTrigger.subscribe((e) => {
       });
       solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
     } catch (e) {
-      // console.error('Error teleporting solid collision entity to the owner entity.', e);
+      // console.warn('Error teleporting solid collision entity to the owner entity.', e);
       if(solidCollisionEntity?.isValid) solidCollisionEntity.remove();
     }
   }

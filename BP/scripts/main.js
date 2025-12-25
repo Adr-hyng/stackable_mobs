@@ -69,140 +69,186 @@ world.afterEvents.entityHurt.subscribe((e) => {
         return;
     ownerEntity.applyDamage(e.damage, e.damageSource);
 });
+let collisionBoxSwitcherSpawnCount = 0;
 world.afterEvents.worldLoad.subscribe(async () => {
     const processEntities = function* (resolve, jobRef) {
-        try {
-            const players = world.getPlayers();
-            for (const player of players) {
-                const dimension = player.dimension;
-                const entities = dimension.getEntities({ excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"] });
-                for (const entity of entities) {
-                    const aabb = entity.getAABB();
-                    let width = aabb.extent.x * 2;
-                    let height = aabb.extent.y * 2;
-                    yield;
-                    if (width <= 0.0) {
+        let shouldContinue = true;
+        while (shouldContinue) {
+            try {
+                const players = world.getPlayers();
+                for (const player of players) {
+                    try {
+                        const dimension = player.dimension;
+                        const entities = dimension.getEntities({ excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"] });
+                        yield;
+                        for (const entity of entities) {
+                            try {
+                                yield;
+                                if (!entity || !entity.isValid)
+                                    continue;
+                                let aabb = null;
+                                try {
+                                    aabb = entity.getAABB();
+                                }
+                                catch (error) {
+                                    continue;
+                                }
+                                if (!aabb)
+                                    continue;
+                                let width = aabb.extent.x * 2;
+                                let height = aabb.extent.y * 2;
+                                if (width <= 0.0) {
+                                    continue;
+                                }
+                                let viewDirection;
+                                try {
+                                    viewDirection = entity.getViewDirection();
+                                }
+                                catch (error) {
+                                    continue;
+                                }
+                                const horizontalMagnitude = Math.sqrt(viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z);
+                                const normalizedViewX = horizontalMagnitude > 0 ? viewDirection.x / horizontalMagnitude : 0;
+                                const normalizedViewZ = horizontalMagnitude > 0 ? viewDirection.z / horizontalMagnitude : 0;
+                                const extentX = aabb.extent.x;
+                                const extentZ = aabb.extent.z;
+                                const entityCenter = entity.location;
+                                const rightX = -normalizedViewZ;
+                                const rightZ = normalizedViewX;
+                                const frontLeft = {
+                                    x: entityCenter.x + (normalizedViewX * extentX) + (rightX * extentZ),
+                                    y: entityCenter.y,
+                                    z: entityCenter.z + (normalizedViewZ * extentX) + (rightZ * extentZ)
+                                };
+                                const backOffset = 0.5;
+                                const backRight = {
+                                    x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
+                                    y: entityCenter.y,
+                                    z: entityCenter.z - (normalizedViewZ * extentX) - (rightZ * extentZ) - (normalizedViewZ * backOffset)
+                                };
+                                const startCorner = frontLeft;
+                                const endCorner = backRight;
+                                const minX = Math.min(startCorner.x, endCorner.x);
+                                const maxX = Math.max(startCorner.x, endCorner.x);
+                                const minZ = Math.min(startCorner.z, endCorner.z);
+                                const maxZ = Math.max(startCorner.z, endCorner.z);
+                                const detectionLocation = {
+                                    x: minX,
+                                    y: startCorner.y + height + 1,
+                                    z: minZ
+                                };
+                                const detectionVolume = {
+                                    x: maxX - minX,
+                                    y: height + (width / 2),
+                                    z: maxZ - minZ
+                                };
+                                let entitiesAbove = [];
+                                try {
+                                    entitiesAbove = dimension.getEntities({
+                                        excludeTypes: ["yn:collision_box_switcher"],
+                                        families: ["player"],
+                                        closest: 1,
+                                        location: entity.location,
+                                        maxDistance: width * 2,
+                                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                                }
+                                catch (error) {
+                                    continue;
+                                }
+                                if (!entitiesAbove.length) {
+                                    try {
+                                        entitiesAbove = dimension.getEntities({
+                                            excludeTypes: ["yn:collision_box_switcher"],
+                                            location: detectionLocation,
+                                            volume: detectionVolume
+                                        }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
+                                    }
+                                    catch (error) {
+                                        continue;
+                                    }
+                                }
+                                if (!entitiesAbove.length) {
+                                    const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
+                                    if (!solidCollisionEntityID) {
+                                        entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                                        continue;
+                                    }
+                                    const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString());
+                                    if (!solidCollisionEntity) {
+                                        entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                                        continue;
+                                    }
+                                    const noEntitiesAboveTickRaw = entity.getDynamicProperty("yn:noEntitiesAboveTick");
+                                    const noEntitiesAboveTick = (typeof noEntitiesAboveTickRaw === 'number') ? noEntitiesAboveTickRaw : null;
+                                    const currentTick = system.currentTick;
+                                    if (noEntitiesAboveTick === null || noEntitiesAboveTick === undefined) {
+                                        entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+                                        continue;
+                                    }
+                                    if (typeof noEntitiesAboveTick !== 'number' || noEntitiesAboveTick > currentTick) {
+                                        entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
+                                        continue;
+                                    }
+                                    const elapsedTicks = currentTick - noEntitiesAboveTick;
+                                    const requiredTicks = TicksPerSecond / 2;
+                                    if (elapsedTicks < requiredTicks) {
+                                        continue;
+                                    }
+                                    solidCollisionEntity.remove();
+                                    collisionBoxSwitcherSpawnCount--;
+                                    entity.setDynamicProperty('yn:collisionBoxEntityID', null);
+                                    entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                                }
+                                else {
+                                    entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                                    const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
+                                    if (solidCollisionEntityID) {
+                                        continue;
+                                    }
+                                    const eventName = getCompressedEventName(width);
+                                    if (!eventName) {
+                                        continue;
+                                    }
+                                    const topPosition = {
+                                        x: entity.location.x,
+                                        y: entity.location.y + height,
+                                        z: entity.location.z
+                                    };
+                                    const solidCollisionEntity = dimension.spawnEntity("yn:collision_box_switcher", topPosition);
+                                    solidCollisionEntity.triggerEvent(eventName);
+                                    solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
+                                    solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
+                                    entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
+                                    entity.addTag('yn:solid_collision_box');
+                                    collisionBoxSwitcherSpawnCount++;
+                                }
+                            }
+                            catch (error) {
+                                console.warn('Error processing entity:', entity?.id, error);
+                                continue;
+                            }
+                            yield;
+                            console.warn("Total spawned:", collisionBoxSwitcherSpawnCount);
+                        }
+                    }
+                    catch (error) {
+                        console.warn('Error processing player dimension:', error);
                         continue;
                     }
-                    const viewDirection = entity.getViewDirection();
-                    const horizontalMagnitude = Math.sqrt(viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z);
-                    const normalizedViewX = horizontalMagnitude > 0 ? viewDirection.x / horizontalMagnitude : 0;
-                    const normalizedViewZ = horizontalMagnitude > 0 ? viewDirection.z / horizontalMagnitude : 0;
-                    const extentX = aabb.extent.x;
-                    const extentZ = aabb.extent.z;
-                    const entityCenter = entity.location;
-                    const rightX = -normalizedViewZ;
-                    const rightZ = normalizedViewX;
-                    const frontLeft = {
-                        x: entityCenter.x + (normalizedViewX * extentX) + (rightX * extentZ),
-                        y: entityCenter.y,
-                        z: entityCenter.z + (normalizedViewZ * extentX) + (rightZ * extentZ)
-                    };
-                    const backOffset = 0.5;
-                    const backRight = {
-                        x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
-                        y: entityCenter.y,
-                        z: entityCenter.z - (normalizedViewZ * extentX) - (rightZ * extentZ) - (normalizedViewZ * backOffset)
-                    };
-                    const startCorner = frontLeft;
-                    const endCorner = backRight;
-                    const minX = Math.min(startCorner.x, endCorner.x);
-                    const maxX = Math.max(startCorner.x, endCorner.x);
-                    const minZ = Math.min(startCorner.z, endCorner.z);
-                    const maxZ = Math.max(startCorner.z, endCorner.z);
-                    const detectionLocation = {
-                        x: minX,
-                        y: startCorner.y + height + 1,
-                        z: minZ
-                    };
-                    const detectionVolume = {
-                        x: maxX - minX,
-                        y: height + 1,
-                        z: maxZ - minZ
-                    };
-                    let entitiesAbove = [];
-                    entitiesAbove = dimension.getEntities({
-                        excludeTypes: ["yn:collision_box_switcher"],
-                        families: ["player"],
-                        closest: 1,
-                        location: detectionLocation,
-                        minDistance: width,
-                        maxDistance: (width * 2) + 1,
-                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
-                    if (!entitiesAbove.length) {
-                        entitiesAbove = dimension.getEntities({
-                            excludeTypes: ["yn:collision_box_switcher"],
-                            location: detectionLocation,
-                            volume: detectionVolume
-                        }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
-                    }
-                    if (!entitiesAbove.length) {
-                        const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
-                        if (!solidCollisionEntityID) {
-                            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-                            continue;
-                        }
-                        const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString());
-                        if (!solidCollisionEntity) {
-                            entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-                            continue;
-                        }
-                        const noEntitiesAboveTickRaw = entity.getDynamicProperty("yn:noEntitiesAboveTick");
-                        const noEntitiesAboveTick = (typeof noEntitiesAboveTickRaw === 'number') ? noEntitiesAboveTickRaw : null;
-                        const currentTick = system.currentTick;
-                        if (noEntitiesAboveTick === null || noEntitiesAboveTick === undefined) {
-                            entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
-                            continue;
-                        }
-                        if (typeof noEntitiesAboveTick !== 'number' || noEntitiesAboveTick > currentTick) {
-                            entity.setDynamicProperty('yn:noEntitiesAboveTick', currentTick);
-                            continue;
-                        }
-                        const elapsedTicks = currentTick - noEntitiesAboveTick;
-                        const requiredTicks = 2 - 1;
-                        if (elapsedTicks < requiredTicks) {
-                            continue;
-                        }
-                        solidCollisionEntity.remove();
-                        entity.setDynamicProperty('yn:collisionBoxEntityID', null);
-                        entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-                        console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
-                    }
-                    else {
-                        entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-                        const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
-                        if (solidCollisionEntityID) {
-                            continue;
-                        }
-                        const eventName = getCompressedEventName(width);
-                        if (!eventName) {
-                            continue;
-                        }
-                        const topPosition = {
-                            x: entity.location.x,
-                            y: entity.location.y + height,
-                            z: entity.location.z
-                        };
-                        const solidCollisionEntity = dimension.spawnEntity("yn:collision_box_switcher", topPosition);
-                        solidCollisionEntity.triggerEvent(eventName);
-                        solidCollisionEntity.setDynamicProperty('collisionBoxOwnerEntityID', entity.id);
-                        solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
-                        entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
-                        entity.addTag('yn:solid_collision_box');
-                        console.warn('Spawned solid collision box entity for entity:', entity.id);
-                    }
+                }
+                for (let i = 0; i < 10; i++) {
+                    yield;
+                }
+            }
+            catch (error) {
+                console.warn('Error in processEntities loop:', error);
+                for (let i = 0; i < 3; i++) {
                     yield;
                 }
             }
         }
-        catch (error) {
-            console.error('Error in world load job:', error);
-        }
-        system.run(async () => {
-            await runJobAsync(processEntities);
-            system.clearJob(jobRef.job);
-            resolve();
-        });
+        system.clearJob(jobRef.job);
+        resolve();
     };
     await runJobAsync(processEntities);
 });
