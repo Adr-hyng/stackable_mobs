@@ -4,12 +4,12 @@
 		"description": {
 			"identifier": "yn:collision_box_switchers",
 			"materials": {
-				// "default": "entity_emissive_alpha_one_sided" // For Debug
-				"default": "entity_alphatest"
+				"default": "entity_emissive_alpha_one_sided" // For Debug
+				// "default": "entity_alphatest"
 			},
 			"textures": {
-				// "default": "textures/entity/outline" // For Debug
-				"default": "textures/entity/invisible"
+				"default": "textures/entity/outline" // For Debug
+				// "default": "textures/entity/invisible"
 			},
 			"geometry": {
 				"default": "geometry.outline"

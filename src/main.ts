@@ -1,7 +1,6 @@
-import { world, system, Entity, TicksPerSecond, EntityComponentTypes, MolangVariableMap, AABB } from "@minecraft/server";
+import { world, system, Entity, TicksPerSecond, EntityComponentTypes, AABB } from "@minecraft/server";
 import { MinecraftEntityTypes } from "vanilla-types/index";
 import { runJobAsync } from "./runJobAsync";
-import { Vec3 } from "VectorUtils";
 
 // Configuration for collision box width generation
 const COLLISION_BOX_CONFIG = {
@@ -114,18 +113,30 @@ function getCompressedEventName(width: number): string | null {
 //Apply the damage to the owner entity when the collision box switcher is hurt.
 world.afterEvents.entityHurt.subscribe((e) => {
   const entity = e.hurtEntity;
-  if (entity.typeId !== "yn:collision_box_switcher") return;
-  const ownerEntityID = entity.getDynamicProperty('collisionBoxOwnerEntityID') as number;
-  if (!ownerEntityID) return;
-  const ownerEntity = world.getEntity(ownerEntityID.toString()) as Entity;
-  if (!ownerEntity) return;
-  ownerEntity.applyDamage(e.damage, e.damageSource);
+  if (entity.typeId === "yn:collision_box_switcher") {
+    const ownerEntityID = entity.getDynamicProperty('collisionBoxOwnerEntityID') as number;
+    if (!ownerEntityID) return;
+    const ownerEntity = world.getEntity(ownerEntityID.toString()) as Entity;
+    if (!ownerEntity) return;
+    ownerEntity.applyDamage(e.damage, e.damageSource);
+  }
 });
 
-// Counter for all collision box switcher entities spawned from worldLoad
-let collisionBoxSwitcherSpawnCount = 0;
+world.afterEvents.entityDie.subscribe((e) => {
+  const entity = e.deadEntity;
+  if (!entity || !entity.isValid) return;
+  if (entity.typeId === "yn:collision_box_switcher") return;
+  const solidCollisionEntityID = entity.getDynamicProperty('yn:collisionBoxEntityID') as number;
+  if (!solidCollisionEntityID) return;
+  const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString()) as Entity;
+  if (!solidCollisionEntity) return;
+  solidCollisionEntity.remove();
+});
+
 
 world.afterEvents.worldLoad.subscribe( async () => {
+  // Counter for all collision box switcher entities spawned from worldLoad
+  let collisionBoxSwitcherSpawnCount = 0;
   // Process entities in batches to distribute load across ticks
   const processEntities = function*(resolve: () => void, jobRef: { job: number }) {
     // Use a while loop instead of recursion
@@ -363,27 +374,26 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 }
               } catch (error) {
                 // Log error but continue processing other entities
-                console.warn('Error processing entity:', entity?.id, error);
+                console.error('Error processing entity:', entity?.id, error);
                 continue;
               }
               
               yield; // Yield after processing each entity to distribute load across ticks
-              console.warn("Total spawned:", collisionBoxSwitcherSpawnCount);
             }
           } catch (error) {
             // Log error but continue processing other players
-            console.warn('Error processing player dimension:', error);
+            console.error('Error processing player dimension:', error);
             continue;
           }
         }
         
         // Wait 10 ticks (0.5 seconds) before next iteration
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 5; i++) {
           yield;
         }
       } catch (error) {
         // Log error but continue the while loop
-        console.warn('Error in processEntities loop:', error);
+        console.error('Error in processEntities loop:', error);
         // Wait a bit before retrying
         for (let i = 0; i < 3; i++) {
           yield;

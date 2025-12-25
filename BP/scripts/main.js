@@ -59,18 +59,32 @@ function getCompressedEventName(width) {
 }
 world.afterEvents.entityHurt.subscribe((e) => {
     const entity = e.hurtEntity;
-    if (entity.typeId !== "yn:collision_box_switcher")
-        return;
-    const ownerEntityID = entity.getDynamicProperty('collisionBoxOwnerEntityID');
-    if (!ownerEntityID)
-        return;
-    const ownerEntity = world.getEntity(ownerEntityID.toString());
-    if (!ownerEntity)
-        return;
-    ownerEntity.applyDamage(e.damage, e.damageSource);
+    if (entity.typeId === "yn:collision_box_switcher") {
+        const ownerEntityID = entity.getDynamicProperty('collisionBoxOwnerEntityID');
+        if (!ownerEntityID)
+            return;
+        const ownerEntity = world.getEntity(ownerEntityID.toString());
+        if (!ownerEntity)
+            return;
+        ownerEntity.applyDamage(e.damage, e.damageSource);
+    }
 });
-let collisionBoxSwitcherSpawnCount = 0;
+world.afterEvents.entityDie.subscribe((e) => {
+    const entity = e.deadEntity;
+    if (!entity || !entity.isValid)
+        return;
+    if (entity.typeId === "yn:collision_box_switcher")
+        return;
+    const solidCollisionEntityID = entity.getDynamicProperty('yn:collisionBoxEntityID');
+    if (!solidCollisionEntityID)
+        return;
+    const solidCollisionEntity = world.getEntity(solidCollisionEntityID.toString());
+    if (!solidCollisionEntity)
+        return;
+    solidCollisionEntity.remove();
+});
 world.afterEvents.worldLoad.subscribe(async () => {
+    let collisionBoxSwitcherSpawnCount = 0;
     const processEntities = function* (resolve, jobRef) {
         let shouldContinue = true;
         while (shouldContinue) {
@@ -224,24 +238,23 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 }
                             }
                             catch (error) {
-                                console.warn('Error processing entity:', entity?.id, error);
+                                console.error('Error processing entity:', entity?.id, error);
                                 continue;
                             }
                             yield;
-                            console.warn("Total spawned:", collisionBoxSwitcherSpawnCount);
                         }
                     }
                     catch (error) {
-                        console.warn('Error processing player dimension:', error);
+                        console.error('Error processing player dimension:', error);
                         continue;
                     }
                 }
-                for (let i = 0; i < 10; i++) {
+                for (let i = 0; i < 5; i++) {
                     yield;
                 }
             }
             catch (error) {
-                console.warn('Error in processEntities loop:', error);
+                console.error('Error in processEntities loop:', error);
                 for (let i = 0; i < 3; i++) {
                     yield;
                 }
