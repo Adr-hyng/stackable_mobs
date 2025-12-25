@@ -112,7 +112,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                     const maxZ = Math.max(startCorner.z, endCorner.z);
                     const detectionLocation = {
                         x: minX,
-                        y: startCorner.y + height,
+                        y: startCorner.y + height + 1,
                         z: minZ
                     };
                     const detectionVolume = {
@@ -125,12 +125,13 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         excludeTypes: ["yn:collision_box_switcher"],
                         families: ["player"],
                         closest: 1,
-                        maxDistance: width + 1,
-                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && _entity.isFalling);
+                        location: detectionLocation,
+                        minDistance: width,
+                        maxDistance: (width * 2) + 1,
+                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
                     if (!entitiesAbove.length) {
                         entitiesAbove = dimension.getEntities({
                             excludeTypes: ["yn:collision_box_switcher"],
-                            families: ["player"],
                             location: detectionLocation,
                             volume: detectionVolume
                         }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
@@ -158,7 +159,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                             continue;
                         }
                         const elapsedTicks = currentTick - noEntitiesAboveTick;
-                        const requiredTicks = TicksPerSecond - 1;
+                        const requiredTicks = 2 - 1;
                         if (elapsedTicks < requiredTicks) {
                             continue;
                         }
@@ -177,7 +178,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         if (!eventName) {
                             continue;
                         }
-                        let topPosition = {
+                        const topPosition = {
                             x: entity.location.x,
                             y: entity.location.y + height,
                             z: entity.location.z

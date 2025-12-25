@@ -194,7 +194,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
           
           const detectionLocation = {
             x: minX,
-            y: startCorner.y + height, // Start at entity top
+            y: startCorner.y + height + 1, // Start at entity top
             z: minZ
           };
           
@@ -210,14 +210,16 @@ world.afterEvents.worldLoad.subscribe( async () => {
             excludeTypes: ["yn:collision_box_switcher"], 
             families: ["player"],
             closest: 1,
-            maxDistance: width + 1,
-          }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && _entity.isFalling);
+            location: detectionLocation,
+            minDistance: width,
+            maxDistance: (width * 2) + 1,
+          }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
 
           if(!entitiesAbove.length) {
             // Check for 2nd prioirity
             entitiesAbove = dimension.getEntities({
               excludeTypes: ["yn:collision_box_switcher"], 
-              families: ["player"],
+              // families: ["player"],
               location: detectionLocation,
               volume: detectionVolume
             }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
@@ -257,7 +259,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
             // Check if 19 ticks (1 tick short of 1 second) have passed since first detection
             // This allows instant detection when an entity appears above
             const elapsedTicks = currentTick - noEntitiesAboveTick;
-            const requiredTicks = TicksPerSecond - 1; // 19 ticks = 0.95 seconds
+            const requiredTicks = 2 - 1; // 19 ticks = 0.95 seconds
             
             if (elapsedTicks < requiredTicks) {
               // Not enough time has passed, wait more
@@ -301,8 +303,8 @@ world.afterEvents.worldLoad.subscribe( async () => {
               continue;
             }
           
-            // Summon collision box switcher entity
-            let topPosition = {
+            // Calculate the block location (floor coordinates) where the collision box will be
+            const topPosition = {
               x: entity.location.x,
               y: entity.location.y + height,
               z: entity.location.z
