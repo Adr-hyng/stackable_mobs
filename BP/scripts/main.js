@@ -95,11 +95,14 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         const dimension = player.dimension;
                         const entities = dimension.getEntities({ excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"] });
                         yield;
+                        const entityCount = entities.length;
+                        const yieldFrequency = entityCount > 50 ? 1 : 5;
+                        let entityProcessedCount = 0;
                         for (const entity of entities) {
                             try {
-                                yield;
                                 if (!entity || !entity.isValid)
                                     continue;
+                                const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
                                 let aabb = null;
                                 try {
                                     aabb = entity.getAABB();
@@ -114,6 +117,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 if (width <= 0.0) {
                                     continue;
                                 }
+                                const entityLocation = entity.location;
                                 let viewDirection;
                                 try {
                                     viewDirection = entity.getViewDirection();
@@ -121,12 +125,13 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 catch (error) {
                                     continue;
                                 }
-                                const horizontalMagnitude = Math.sqrt(viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z);
+                                const horizontalMagnitudeSq = viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z;
+                                const horizontalMagnitude = Math.sqrt(horizontalMagnitudeSq);
                                 const normalizedViewX = horizontalMagnitude > 0 ? viewDirection.x / horizontalMagnitude : 0;
                                 const normalizedViewZ = horizontalMagnitude > 0 ? viewDirection.z / horizontalMagnitude : 0;
                                 const extentX = aabb.extent.x;
                                 const extentZ = aabb.extent.z;
-                                const entityCenter = entity.location;
+                                const entityCenter = entityLocation;
                                 const rightX = -normalizedViewZ;
                                 const rightZ = normalizedViewX;
                                 const frontLeft = {
@@ -159,12 +164,12 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 let entitiesAbove = [];
                                 try {
                                     entitiesAbove = dimension.getEntities({
-                                        excludeTypes: ["yn:collision_box_switcher"],
+                                        excludeTypes: ["yn:collision_box_switcher", "minecraft:item"],
                                         families: ["player"],
                                         closest: 1,
-                                        location: entity.location,
+                                        location: entityLocation,
                                         maxDistance: width * 2,
-                                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                                    }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
                                 }
                                 catch (error) {
                                     continue;
@@ -172,17 +177,16 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 if (!entitiesAbove.length) {
                                     try {
                                         entitiesAbove = dimension.getEntities({
-                                            excludeTypes: ["yn:collision_box_switcher"],
+                                            excludeTypes: ["yn:collision_box_switcher", "minecraft:item"],
                                             location: detectionLocation,
                                             volume: detectionVolume
-                                        }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
+                                        }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
                                     }
                                     catch (error) {
                                         continue;
                                     }
                                 }
                                 if (!entitiesAbove.length) {
-                                    const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
                                     if (!solidCollisionEntityID) {
                                         entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
                                         continue;
@@ -215,7 +219,6 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 }
                                 else {
                                     entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
-                                    const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
                                     if (solidCollisionEntityID) {
                                         continue;
                                     }
@@ -224,9 +227,9 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                         continue;
                                     }
                                     const topPosition = {
-                                        x: entity.location.x,
-                                        y: entity.location.y + height,
-                                        z: entity.location.z
+                                        x: entityLocation.x,
+                                        y: entityLocation.y + height,
+                                        z: entityLocation.z
                                     };
                                     const solidCollisionEntity = dimension.spawnEntity("yn:collision_box_switcher", topPosition);
                                     solidCollisionEntity.triggerEvent(eventName);
@@ -241,7 +244,10 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 console.error('Error processing entity:', entity?.id, error);
                                 continue;
                             }
-                            yield;
+                            entityProcessedCount++;
+                            if (entityProcessedCount % yieldFrequency === 0) {
+                                yield;
+                            }
                         }
                     }
                     catch (error) {

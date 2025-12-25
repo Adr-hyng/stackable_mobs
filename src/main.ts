@@ -151,10 +151,20 @@ world.afterEvents.worldLoad.subscribe( async () => {
             const dimension = player.dimension;
             const entities = dimension.getEntities({excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"]});
             yield;
+            // Optimize yield frequency based on entity count
+            const entityCount = entities.length;
+            const yieldFrequency = entityCount > 50 ? 1 : 5; // Yield every entity if many, every 5 if few
+            let entityProcessedCount = 0;
+            
             for (const entity of entities) {
               try {
-                yield;
                 if(!entity || !entity.isValid) continue;
+                
+                // Early tag check: Cache collision box entity ID early for later use
+                const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
+                // Early exit: Skip entities without tag and without collision box ID (they don't need processing)
+                // However, we still need to check for entities above to potentially spawn one, so we continue
+                // but this early check helps us know the state early
                 
                 // Safely get AABB with error handling
                 let aabb: AABB | null = null;
@@ -174,6 +184,9 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   continue;
                 }
                 
+                // Cache entity location to avoid multiple property accesses
+                const entityLocation = entity.location;
+                
                 // Safely get view direction
                 let viewDirection;
                 try {
@@ -183,15 +196,17 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   continue;
                 }
           
-          // Normalize view direction to only use X and Z (ignore Y)
-          const horizontalMagnitude = Math.sqrt(viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z);
-          const normalizedViewX = horizontalMagnitude > 0 ? viewDirection.x / horizontalMagnitude : 0;
-          const normalizedViewZ = horizontalMagnitude > 0 ? viewDirection.z / horizontalMagnitude : 0;
-          
-          // Get the actual entity extents from AABB
-          const extentX = aabb.extent.x;  // Half-width in X
-          const extentZ = aabb.extent.z;  // Half-width in Z (depth)
-          const entityCenter = entity.location;
+                // Normalize view direction to only use X and Z (ignore Y)
+                // Cache Math.sqrt calculation
+                const horizontalMagnitudeSq = viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z;
+                const horizontalMagnitude = Math.sqrt(horizontalMagnitudeSq);
+                const normalizedViewX = horizontalMagnitude > 0 ? viewDirection.x / horizontalMagnitude : 0;
+                const normalizedViewZ = horizontalMagnitude > 0 ? viewDirection.z / horizontalMagnitude : 0;
+                
+                // Get the actual entity extents from AABB
+                const extentX = aabb.extent.x;  // Half-width in X
+                const extentZ = aabb.extent.z;  // Half-width in Z (depth)
+                const entityCenter = entityLocation; // Use cached location
           
           // Calculate perpendicular (right) vector by rotating normalized view direction 90 degrees
           const rightX = -normalizedViewZ;
@@ -244,12 +259,12 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 // Check for 1st priority, check for jumping nearby entity
                 try {
                   entitiesAbove = dimension.getEntities({
-                    excludeTypes: ["yn:collision_box_switcher"], 
+                    excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], 
                     families: ["player"],
                     closest: 1,
-                    location: entity.location,
+                    location: entityLocation, // Use cached location
                     maxDistance: width * 2,
-                  }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                  }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
                 } catch (error) {
                   // If getEntities fails, continue to next entity
                   continue;
@@ -259,10 +274,10 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // Check for 2nd prioirity
                   try {
                     entitiesAbove = dimension.getEntities({
-                      excludeTypes: ["yn:collision_box_switcher"], 
+                      excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], 
                       location: detectionLocation,
                       volume: detectionVolume
-                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
+                    }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
                   } catch (error) {
                     // If getEntities fails, continue to next entity
                     continue;
@@ -270,7 +285,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 }
 
                 if(!entitiesAbove.length) {
-                  const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
+                  // Use already retrieved solidCollisionEntityID from early check
                   if(!solidCollisionEntityID) {
                     // Clear the no entities above timestamp if it exists
                     entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
@@ -339,7 +354,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // }, particle);
 
                   // If there's no solid collision box, then spawn one.
-                  const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
+                  // Use already retrieved solidCollisionEntityID from early check
                   if(solidCollisionEntityID) {
                     continue;
                   }
@@ -351,10 +366,11 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   }
                 
                   // Calculate the block location (floor coordinates) where the collision box will be
+                  // Use cached entity location
                   const topPosition = {
-                    x: entity.location.x,
-                    y: entity.location.y + height,
-                    z: entity.location.z
+                    x: entityLocation.x,
+                    y: entityLocation.y + height,
+                    z: entityLocation.z
                   };
           
                   const solidCollisionEntity = dimension.spawnEntity(
@@ -378,7 +394,11 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 continue;
               }
               
-              yield; // Yield after processing each entity to distribute load across ticks
+              entityProcessedCount++;
+              // Optimize yield frequency: yield every N entities based on total count
+              if (entityProcessedCount % yieldFrequency === 0) {
+                yield;
+              }
             }
           } catch (error) {
             // Log error but continue processing other players

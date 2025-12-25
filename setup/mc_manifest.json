@@ -3,12 +3,12 @@
 	"header": {
 		"bp_name": "Stackable Mobs BP",
 		"rp_name": "Stackable Mobs RP",
-		"description": "Making mobs stackable like boats. \n @Made By: https://twitter.com/h_YanG_0A",
+		"description": "Making mobs stackable like boats and solid like happy ghast \n @Made By: https://twitter.com/h_YanG_0A",
 		"bp_uuid": "9c5eca3d-1499-481b-b066-eff81c24c16d",
 		"rp_uuid": "a4708bbf-5227-4d9c-9a0c-d935287aee5b",
 		"version": [
 			1,
-			1,
+			0,
 			0
 		],
 		"min_engine_version": [
@@ -35,7 +35,7 @@
 			"uuid": "c15ca7e1-d90a-4244-81fc-1c51264b0c0f",
 			"version": [
 				1,
-				1,
+				0,
 				0
 			],
 			"entry": "scripts/main.js"
@@ -50,7 +50,7 @@
 			"uuid": "8dc80e2f-f712-4c8a-bedb-ae8c3226a5e3",
 			"version": [
 				1,
-				1,
+				0,
 				0
 			]
 		}
@@ -59,10 +59,6 @@
 		{
 			"module_name": "@minecraft/server",
 			"version": "2.4.0"
-		},
-		{
-			"module_name": "@minecraft/server-ui",
-			"version": "2.0.0"
 		}
 	],
 	"metadata": {
