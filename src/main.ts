@@ -149,22 +149,12 @@ world.afterEvents.worldLoad.subscribe( async () => {
         for (const player of players) {
           try {
             const dimension = player.dimension;
-            const entities = dimension.getEntities({excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"]});
+            const entities = dimension.getEntities({tags: ["yn:solid_collision_box"]});
             yield;
-            // Optimize yield frequency based on entity count
-            const entityCount = entities.length;
-            const yieldFrequency = entityCount > 50 ? 1 : 5; // Yield every entity if many, every 5 if few
-            let entityProcessedCount = 0;
-            
             for (const entity of entities) {
               try {
+                yield;
                 if(!entity || !entity.isValid) continue;
-                
-                // Early tag check: Cache collision box entity ID early for later use
-                const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
-                // Early exit: Skip entities without tag and without collision box ID (they don't need processing)
-                // However, we still need to check for entities above to potentially spawn one, so we continue
-                // but this early check helps us know the state early
                 
                 // Safely get AABB with error handling
                 let aabb: AABB | null = null;
@@ -184,9 +174,6 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   continue;
                 }
                 
-                // Cache entity location to avoid multiple property accesses
-                const entityLocation = entity.location;
-                
                 // Safely get view direction
                 let viewDirection;
                 try {
@@ -197,76 +184,76 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 }
           
                 // Normalize view direction to only use X and Z (ignore Y)
-                // Cache Math.sqrt calculation
-                const horizontalMagnitudeSq = viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z;
-                const horizontalMagnitude = Math.sqrt(horizontalMagnitudeSq);
+                const horizontalMagnitude = Math.sqrt(viewDirection.x * viewDirection.x + viewDirection.z * viewDirection.z);
                 const normalizedViewX = horizontalMagnitude > 0 ? viewDirection.x / horizontalMagnitude : 0;
                 const normalizedViewZ = horizontalMagnitude > 0 ? viewDirection.z / horizontalMagnitude : 0;
                 
                 // Get the actual entity extents from AABB
                 const extentX = aabb.extent.x;  // Half-width in X
                 const extentZ = aabb.extent.z;  // Half-width in Z (depth)
-                const entityCenter = entityLocation; // Use cached location
-          
-          // Calculate perpendicular (right) vector by rotating normalized view direction 90 degrees
-          const rightX = -normalizedViewZ;
-          const rightZ = normalizedViewX;
-          
-          // Calculate the four corners of the entity's collision box
-          // Front corners: center + (extentX * forward) ± (extentZ * right)
-          // Back corners: center - (extentX * forward) ± (extentZ * right)
-          const frontLeft = {
-            x: entityCenter.x + (normalizedViewX * extentX) + (rightX * extentZ),
-            y: entityCenter.y,
-            z: entityCenter.z + (normalizedViewZ * extentX) + (rightZ * extentZ)
-          };
-          
-          // Offset to shift backRight corner further towards the back
-          // Adjust this value: 0.5 for half block, 1.0 for one block shift
-          const backOffset = 0.5; // Change to 1.0 for 1 block shift
-          
-          const backRight = {
-            x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
-            y: entityCenter.y,
-            z: entityCenter.z - (normalizedViewZ * extentX) - (rightZ * extentZ) - (normalizedViewZ * backOffset)
-          };
-          
-          // For particles: start = front-left corner, end = back-right corner (opposite corners)
-          const startCorner = frontLeft;
-          const endCorner = backRight;
-          
-          // Calculate detection volume with proper bounds
-          // Use min/max to ensure we get the correct bounding box
-          // The volume must be absolute positive values representing the bounding box size
-          const minX = Math.min(startCorner.x, endCorner.x);
-          const maxX = Math.max(startCorner.x, endCorner.x);
-          const minZ = Math.min(startCorner.z, endCorner.z);
-          const maxZ = Math.max(startCorner.z, endCorner.z);
-          
-          const detectionLocation = {
-            x: minX,
-            y: startCorner.y + height + 1, // Start at entity top
-            z: minZ
-          };
-          
-          const detectionVolume = {
-            x: maxX - minX,
-            y: height + (width / 2), // Increased slightly to catch edge cases
-            z: maxZ - minZ
-          };
+                const entityCenter = entity.location;
+                
+                // Calculate perpendicular (right) vector by rotating normalized view direction 90 degrees
+                const rightX = -normalizedViewZ;
+                const rightZ = normalizedViewX;
+                
+                // Calculate the four corners of the entity's collision box
+                // Front corners: center + (extentX * forward) ± (extentZ * right)
+                // Back corners: center - (extentX * forward) ± (extentZ * right)
+                const frontLeft = {
+                  x: entityCenter.x + (normalizedViewX * extentX) + (rightX * extentZ),
+                  y: entityCenter.y,
+                  z: entityCenter.z + (normalizedViewZ * extentX) + (rightZ * extentZ)
+                };
+                
+                // Offset to shift backRight corner further towards the back
+                // Adjust this value: 0.5 for half block, 1.0 for one block shift
+                const backOffset = 0.5; // Change to 1.0 for 1 block shift
+                
+                const backRight = {
+                  x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
+                  y: entityCenter.y,
+                  z: entityCenter.z - (normalizedViewZ * extentX) - (rightZ * extentZ) - (normalizedViewZ * backOffset)
+                };
+                
+                // For particles: start = front-left corner, end = back-right corner (opposite corners)
+                const startCorner = frontLeft;
+                const endCorner = backRight;
+                
+                // Calculate detection volume with proper bounds
+                // Use min/max to ensure we get the correct bounding box
+                // The volume must be absolute positive values representing the bounding box size
+                const minX = Math.min(startCorner.x, endCorner.x);
+                const maxX = Math.max(startCorner.x, endCorner.x);
+                const minZ = Math.min(startCorner.z, endCorner.z);
+                const maxZ = Math.max(startCorner.z, endCorner.z);
+                
+                const detectionLocation = {
+                  x: minX,
+                  y: startCorner.y + height, // Start at entity top
+                  z: minZ
+                };
+                
+                const detectionVolume = {
+                  x: maxX - minX,
+                  y: height + (width / 2), // Increased slightly to catch edge cases
+                  z: maxZ - minZ
+                };
+
                 let entitiesAbove: Entity[] = [];
 
                 // Check for 1st priority, check for jumping nearby entity
                 try {
                   entitiesAbove = dimension.getEntities({
-                    excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], 
                     families: ["player"],
                     closest: 1,
-                    location: entityLocation, // Use cached location
+                    location: entityCenter,
                     maxDistance: width * 2,
-                  }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                    tags: ["yn:solid_collision_box"],
+                  }).filter((_entity) => _entity.id !== entity.id);
                 } catch (error) {
                   // If getEntities fails, continue to next entity
+                  console.error('Error getting entities above:', error);
                   continue;
                 }
 
@@ -274,10 +261,10 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // Check for 2nd prioirity
                   try {
                     entitiesAbove = dimension.getEntities({
-                      excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], 
                       location: detectionLocation,
-                      volume: detectionVolume
-                    }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
+                      volume: detectionVolume,
+                      tags: ["yn:solid_collision_box"],
+                    }).filter((_entity) => _entity.id !== entity.id);
                   } catch (error) {
                     // If getEntities fails, continue to next entity
                     continue;
@@ -285,7 +272,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 }
 
                 if(!entitiesAbove.length) {
-                  // Use already retrieved solidCollisionEntityID from early check
+                  const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
                   if(!solidCollisionEntityID) {
                     // Clear the no entities above timestamp if it exists
                     entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
@@ -318,7 +305,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // Check if 19 ticks (1 tick short of 1 second) have passed since first detection
                   // This allows instant detection when an entity appears above
                   const elapsedTicks = currentTick - noEntitiesAboveTick;
-                  const requiredTicks = TicksPerSecond / 2; // 19 ticks = 0.95 seconds
+                  const requiredTicks = TicksPerSecond; // 19 ticks = 0.95 seconds
                   
                   if (elapsedTicks < requiredTicks) {
                     // Not enough time has passed, wait more
@@ -354,7 +341,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // }, particle);
 
                   // If there's no solid collision box, then spawn one.
-                  // Use already retrieved solidCollisionEntityID from early check
+                  const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
                   if(solidCollisionEntityID) {
                     continue;
                   }
@@ -362,15 +349,15 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // Get compressed event name based on width
                   const eventName = getCompressedEventName(width);
                   if (!eventName) {
+                    console.error('Error getting event name:', width);
                     continue;
                   }
                 
                   // Calculate the block location (floor coordinates) where the collision box will be
-                  // Use cached entity location
                   const topPosition = {
-                    x: entityLocation.x,
-                    y: entityLocation.y + height,
-                    z: entityLocation.z
+                    x: entityCenter.x,
+                    y: entityCenter.y + height,
+                    z: entityCenter.z
                   };
           
                   const solidCollisionEntity = dimension.spawnEntity(
@@ -394,11 +381,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
                 continue;
               }
               
-              entityProcessedCount++;
-              // Optimize yield frequency: yield every N entities based on total count
-              if (entityProcessedCount % yieldFrequency === 0) {
-                yield;
-              }
+              yield; // Yield after processing each entity to distribute load across ticks
             }
           } catch (error) {
             // Log error but continue processing other players
@@ -442,19 +425,18 @@ world.afterEvents.entitySpawn.subscribe((spawnEvent) => {
   // a stackable entity based on collision box size, if it is working for creating a solid mobs (new addon)
   if([
     "yn:collision_box_switcher",
+    "minecraft:item",
     MinecraftEntityTypes.HappyGhast,
     MinecraftEntityTypes.Boat,
     MinecraftEntityTypes.Shulker,
   ].includes(entity?.typeId)) return;
-  if(entity?.hasComponent(EntityComponentTypes.Movement)) {
-
-    const aabb = entity.getAABB();
-    let width = aabb.extent.x * 2;
-    // Ignore if width is equal or below 0.0
-    if (width <= 0.0) return;
-    entity.addTag('yn:solid_collision_box');
-    return;
-  }
+  if(!entity?.hasComponent(EntityComponentTypes.Movement)) return;
+  const aabb = entity.getAABB();
+  let width = aabb.extent.x * 2;
+  // Ignore if width is equal or below 0.0
+  if (width <= 0.0) return;
+  entity.addTag('yn:solid_collision_box');
+  return;
 });
 
 // Teleport as soon as this entity is loaded. This works even with reload command or reloadin world.
