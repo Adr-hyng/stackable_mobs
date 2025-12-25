@@ -106,18 +106,23 @@ world.afterEvents.worldLoad.subscribe(async () => {
                     };
                     const startCorner = frontLeft;
                     const endCorner = backRight;
+                    const minX = Math.min(startCorner.x, endCorner.x);
+                    const maxX = Math.max(startCorner.x, endCorner.x);
+                    const minZ = Math.min(startCorner.z, endCorner.z);
+                    const maxZ = Math.max(startCorner.z, endCorner.z);
                     const detectionLocation = {
-                        x: startCorner.x,
-                        y: startCorner.y + height + 1,
-                        z: startCorner.z
+                        x: minX,
+                        y: startCorner.y + height,
+                        z: minZ
                     };
                     const detectionVolume = {
-                        x: endCorner.x - startCorner.x,
-                        y: 5,
-                        z: endCorner.z - startCorner.z
+                        x: maxX - minX,
+                        y: height + 1,
+                        z: maxZ - minZ
                     };
                     const entitiesAbove = dimension.getEntities({
                         excludeTypes: ["yn:collision_box_switcher"],
+                        families: ["player"],
                         location: detectionLocation,
                         volume: detectionVolume
                     }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
@@ -151,6 +156,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         solidCollisionEntity.remove();
                         entity.setDynamicProperty('yn:collisionBoxEntityID', null);
                         entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
+                        console.warn('Removed solid collision box entity for entity:', entity.id, 'after', elapsedTicks, 'ticks');
                     }
                     else {
                         entity.setDynamicProperty('yn:noEntitiesAboveTick', null);
@@ -173,6 +179,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         solidCollisionEntity.setDynamicProperty('yn:lastExecutedTick', system.currentTick);
                         entity.setDynamicProperty('yn:collisionBoxEntityID', solidCollisionEntity.id);
                         entity.addTag('yn:solid_collision_box');
+                        console.warn('Spawned solid collision box entity for entity:', entity.id);
                     }
                     yield;
                 }
