@@ -77,10 +77,10 @@ world.afterEvents.worldLoad.subscribe(async () => {
                 const dimension = player.dimension;
                 const entities = dimension.getEntities({ excludeTypes: ["yn:collision_box_switcher", "minecraft:item"], families: ["mob"] });
                 for (const entity of entities) {
-                    yield;
                     const aabb = entity.getAABB();
                     let width = aabb.extent.x * 2;
                     let height = aabb.extent.y * 2;
+                    yield;
                     if (width <= 0.0) {
                         continue;
                     }
@@ -98,7 +98,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         y: entityCenter.y,
                         z: entityCenter.z + (normalizedViewZ * extentX) + (rightZ * extentZ)
                     };
-                    const backOffset = 1;
+                    const backOffset = 0.5;
                     const backRight = {
                         x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
                         y: entityCenter.y,
@@ -120,12 +120,21 @@ world.afterEvents.worldLoad.subscribe(async () => {
                         y: height + 1,
                         z: maxZ - minZ
                     };
-                    const entitiesAbove = dimension.getEntities({
+                    let entitiesAbove = [];
+                    entitiesAbove = dimension.getEntities({
                         excludeTypes: ["yn:collision_box_switcher"],
                         families: ["player"],
-                        location: detectionLocation,
-                        volume: detectionVolume
-                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                        closest: 1,
+                        maxDistance: width + 1,
+                    }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && _entity.isFalling);
+                    if (!entitiesAbove.length) {
+                        entitiesAbove = dimension.getEntities({
+                            excludeTypes: ["yn:collision_box_switcher"],
+                            families: ["player"],
+                            location: detectionLocation,
+                            volume: detectionVolume
+                        }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+                    }
                     if (!entitiesAbove.length) {
                         const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID");
                         if (!solidCollisionEntityID) {

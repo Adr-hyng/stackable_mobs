@@ -134,11 +134,11 @@ world.afterEvents.worldLoad.subscribe( async () => {
         
         for (const entity of entities) {
 
-          yield;
           // const location = {x: Math.floor(entity.location.x), y: Math.floor(entity.location.y), z: Math.floor(entity.location.z)};
           const aabb = entity.getAABB();
           let width = aabb.extent.x * 2;
           let height = aabb.extent.y * 2;
+          yield;
         
           // Ignore if width is equal or below 0.0
           if (width <= 0.0) {
@@ -172,7 +172,7 @@ world.afterEvents.worldLoad.subscribe( async () => {
           
           // Offset to shift backRight corner further towards the back
           // Adjust this value: 0.5 for half block, 1.0 for one block shift
-          const backOffset = 1; // Change to 1.0 for 1 block shift
+          const backOffset = 0.5; // Change to 1.0 for 1 block shift
           
           const backRight = {
             x: entityCenter.x - (normalizedViewX * extentX) - (rightX * extentZ) - (normalizedViewX * backOffset),
@@ -203,13 +203,25 @@ world.afterEvents.worldLoad.subscribe( async () => {
             y: height + 1, // Increased slightly to catch edge cases
             z: maxZ - minZ
           };
+          let entitiesAbove: Entity[] = [];
 
-          const entitiesAbove = dimension.getEntities({
+          // Check for 1st priority, check for jumping nearby entity
+          entitiesAbove = dimension.getEntities({
             excludeTypes: ["yn:collision_box_switcher"], 
             families: ["player"],
-            location: detectionLocation,
-            volume: detectionVolume
-          }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+            closest: 1,
+            maxDistance: width + 1,
+          }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && _entity.isFalling);
+
+          if(!entitiesAbove.length) {
+            // Check for 2nd prioirity
+            entitiesAbove = dimension.getEntities({
+              excludeTypes: ["yn:collision_box_switcher"], 
+              families: ["player"],
+              location: detectionLocation,
+              volume: detectionVolume
+            }).filter((_entity) => _entity.typeId !== "yn:collision_box_switcher" && _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement));
+          }
 
           if(!entitiesAbove.length) {
             const solidCollisionEntityID = entity.getDynamicProperty("yn:collisionBoxEntityID") as number | null;
