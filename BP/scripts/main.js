@@ -66,13 +66,21 @@ world.afterEvents.entityHurt.subscribe((e) => {
         const ownerEntity = world.getEntity(ownerEntityID.toString());
         if (!ownerEntity)
             return;
-        ownerEntity.applyDamage(e.damage, e.damageSource);
+        try {
+            ownerEntity.applyDamage(e.damage, e.damageSource);
+        }
+        catch (error) {
+            console.error('Error applying damage to the owner entity:', ownerEntity?.id, error);
+            ownerEntity.applyDamage(e.damage);
+        }
     }
 });
 world.afterEvents.entityDie.subscribe((e) => {
     const entity = e.deadEntity;
     if (!entity || !entity.isValid)
         return;
+    if (entity.hasTag('yn:solid_collision_box'))
+        entity.removeTag('yn:solid_collision_box');
     if (entity.typeId === "yn:collision_box_switcher")
         return;
     const solidCollisionEntityID = entity.getDynamicProperty('yn:collisionBoxEntityID');
@@ -91,6 +99,8 @@ world.afterEvents.worldLoad.subscribe(async () => {
             try {
                 const players = world.getPlayers();
                 for (const player of players) {
+                    if (!player.hasTag('yn:solid_collision_box'))
+                        player.addTag('yn:solid_collision_box');
                     try {
                         const dimension = player.dimension;
                         const entities = dimension.getEntities({ tags: ["yn:solid_collision_box"] });
@@ -148,7 +158,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                 const maxZ = Math.max(startCorner.z, endCorner.z);
                                 const detectionLocation = {
                                     x: minX,
-                                    y: startCorner.y + height,
+                                    y: startCorner.y + height + 0.5,
                                     z: minZ
                                 };
                                 const detectionVolume = {
@@ -162,7 +172,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                         families: ["player"],
                                         closest: 1,
                                         location: entity.location,
-                                        maxDistance: width * 2,
+                                        maxDistance: width * 1.5,
                                     }).filter((_entity) => _entity.id !== entity.id);
                                 }
                                 catch (error) {
@@ -203,7 +213,7 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                         continue;
                                     }
                                     const elapsedTicks = currentTick - noEntitiesAboveTick;
-                                    const requiredTicks = TicksPerSecond;
+                                    const requiredTicks = 1;
                                     if (elapsedTicks < requiredTicks) {
                                         continue;
                                     }
