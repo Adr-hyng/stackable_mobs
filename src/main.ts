@@ -239,7 +239,6 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   y: height + (width / 2), // Increased slightly to catch edge cases
                   z: maxZ - minZ
                 };
-
                 let entitiesAbove: Entity[] = [];
 
                 // Check for 1st priority, check for jumping nearby entity
@@ -247,13 +246,11 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   entitiesAbove = dimension.getEntities({
                     families: ["player"],
                     closest: 1,
-                    location: entityCenter,
+                    location: entity.location,
                     maxDistance: width * 2,
-                    tags: ["yn:solid_collision_box"],
                   }).filter((_entity) => _entity.id !== entity.id);
                 } catch (error) {
                   // If getEntities fails, continue to next entity
-                  console.error('Error getting entities above:', error);
                   continue;
                 }
 
@@ -261,10 +258,10 @@ world.afterEvents.worldLoad.subscribe( async () => {
                   // Check for 2nd prioirity
                   try {
                     entitiesAbove = dimension.getEntities({
+                      excludeTypes: ["yn:collision_box_switcher"], 
                       location: detectionLocation,
-                      volume: detectionVolume,
-                      tags: ["yn:solid_collision_box"],
-                    }).filter((_entity) => _entity.id !== entity.id);
+                      volume: detectionVolume
+                    }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
                   } catch (error) {
                     // If getEntities fails, continue to next entity
                     continue;

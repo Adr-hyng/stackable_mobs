@@ -161,22 +161,20 @@ world.afterEvents.worldLoad.subscribe(async () => {
                                     entitiesAbove = dimension.getEntities({
                                         families: ["player"],
                                         closest: 1,
-                                        location: entityCenter,
+                                        location: entity.location,
                                         maxDistance: width * 2,
-                                        tags: ["yn:solid_collision_box"],
                                     }).filter((_entity) => _entity.id !== entity.id);
                                 }
                                 catch (error) {
-                                    console.error('Error getting entities above:', error);
                                     continue;
                                 }
                                 if (!entitiesAbove.length) {
                                     try {
                                         entitiesAbove = dimension.getEntities({
+                                            excludeTypes: ["yn:collision_box_switcher"],
                                             location: detectionLocation,
-                                            volume: detectionVolume,
-                                            tags: ["yn:solid_collision_box"],
-                                        }).filter((_entity) => _entity.id !== entity.id);
+                                            volume: detectionVolume
+                                        }).filter((_entity) => _entity.id !== entity.id && _entity.hasComponent(EntityComponentTypes.Movement) && !_entity.hasComponent(EntityComponentTypes.NavigationFloat));
                                     }
                                     catch (error) {
                                         continue;

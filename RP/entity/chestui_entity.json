@@ -2,7 +2,7 @@
 	"format_version": "1.20.80",
 	"minecraft:client_entity": {
 		"description": {
-			"identifier": "yn:collision_box_switchers",
+			"identifier": "yn:collision_box_switcher",
 			"materials": {
 				"default": "entity_emissive_alpha_one_sided" // For Debug
 				// "default": "entity_alphatest"
